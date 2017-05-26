@@ -2,6 +2,8 @@
 
 A Particle library for TftpServer
 
+This is a work in progress.  The library should be functional for TFTP GET requests but the examples do not work yet.
+
 ## Usage
 
 Connect an SD card on SPI or SPI1, add the TftpServer library to your project and follow this example:
