@@ -25,21 +25,15 @@ You can also upload any files from your computer to the SD card attached to the 
 
 ## Documentation
 
-This is a VERY minimal implementation of a TFTP Server for the Particle
-environment (Tested on the P0 and P1).  The initial version will only support
-the GET methods and does not implement any methods for PUT.  This made the most
-sense during development since it seemed like there was more need to get files
-off of an SD card than there were to put them on.
-
-The server is opened on port 69 by default.  The clientConnected method should
+The server is opened on port 69 by default.  The checkForPacket() method should
 be run in loop as often as possible to improve responsiveness and to avoid having
 the client send duplicate requests due to retransmission timeouts.  Once TRUE is
-returned by clientConnected() it means a UDP packet was received on port 69 and
-you can call handleClientRequest() to do the rest.  The function will block until
+returned by checkForPacket() it means a UDP packet was received on port 69 and
+you can call processRequest() to do the rest.  The function will block until
 the client request is taken care of and then control will pass back to the calling
 function.
 
-In order to have files to send, this library relies on the SdFat-Particle
+In order to have files to send, this library relies on the SdFat
 library.  A pointer to an SdFat object is passed as part of begin() so the
 TFTP server will have access to the SD card without having to create it's own
 instance of the file system.  This also makes the library agnostic as to which
@@ -52,7 +46,7 @@ it could potentially cause file corruption if there was already a file open.
 The attempt has been made to stick as close to the TFTP protocol as possible.
 Timeouts were implemented as best I could figure out because the
 specification doesn't cover timeouts and retransmission explicitly.  Also, to make
-like simpler with the limited number of sockets available, the transfer ID for the
+life simpler with the limited number of sockets available, the transfer ID for the
 server is kept at 69 rather than choosing a new random port number.
 
 The specification can be located at: https://tools.ietf.org/html/rfc1350
@@ -83,14 +77,14 @@ TFTP Formats
   ERROR | 05    |  ErrorCode |   ErrMsg   |   0  |
          ----------------------------------------
 </pre>
+
 ## Future Work
-While the library will accept write requests in NETASCII format, it does not
+While the server will accept write requests in NETASCII format, it does not
 currently do anything to the received library.  This does not strictly conform
 to the TFTP standard but was implemented this way since it was assumed the same
 operating system that is requesting a write will also be the same system that 
 will request a read.  In a more general application this is probably a bad
 assumption but in the use case of a Particle device, this might not be so bad.
-
 Pull requests to address this are certainly welcome if a condition is found where 
 this behavior is not desired.
 
