@@ -2,7 +2,7 @@
 
 A Particle library for TftpServer
 
-This is a work in progress.  The library should be functional for TFTP GET requests but the examples do not work yet.
+This is a work in progress.  The library should be functional but the examples do not work yet and you might need to verify the include to SdFat.
 
 ## Usage
 
@@ -106,13 +106,13 @@ server is kept at 69 rather than choosing a new random port number.
 
 The specification can be located at: https://tools.ietf.org/html/rfc1350
 
-@note A buffer size of 516 bytes is allocated for TFTP transfers
-@note Library developed using ARM GCC 5.3
+<b>Note:</b> A buffer size of 516 bytes is allocated for TFTP transfers
+<b>Note:</b> Library developed using ARM GCC 5.3
 
 From RFC 1350:
 
 TFTP Formats
-
+<pre>
   Type   Op #     Format without header
 
          2 bytes    string   1 byte     string   1 byte
@@ -131,8 +131,8 @@ TFTP Formats
          ----------------------------------------
   ERROR | 05    |  ErrorCode |   ErrMsg   |   0  |
          ----------------------------------------
-
-## FUTURE WORK
+</pre>
+## Future Work
 While the library will accept write requests in NETASCII format, it does not
 currently do anything to the received library.  This does not strictly conform
 to the TFTP standard but was implemented this way since it was assumed the same
