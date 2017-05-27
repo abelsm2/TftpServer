@@ -29,17 +29,14 @@
  *
  * @brief Minimal implementation of TFTP server for Particle devices
  *
- * This is a VERY minimal implementation of a TFTP Server for the Particle
- * environment (Tested on the P0 and P1).  The initial version will only support
- * the GET methods and does not implement any methods for PUT.  This made the most
- * sense during development since it seemed like there was more need to get files
- * off of an SD card than there were to put them on.
+ * This is a VERY minimal implementation of a Trivial File Transfer Protocol (TFTP)
+ * Server for the Particle environment (Tested on the P0 and P1).
  *
- * The server is opened on port 69 by default.  The clientConnected method should
+ * The server is opened on port 69 by default.  The checkForPacket() method should
  * be run in loop as often as possible to improve responsiveness and to avoid having
  * the client send duplicate requests due to retransmission timeouts.  Once TRUE is
- * returned by clientConnected() it means a UDP packet was received on port 69 and
- * you can call handleClientRequest() to do the rest.  The function will block until
+ * returned by checkForPacket() it means a UDP packet was received on port 69 and
+ * you can call processRequest() to do the rest.  The function will block until
  * the client request is taken care of and then control will pass back to the calling
  * function.
  *
@@ -49,9 +46,9 @@
  * instance of the file system.  This also makes the library agnostic as to which
  * SPI instance is used by SdFat (SPI vs. SPI1).
  *
- * It would be best to ensure that no files are open prior to passing control off to
- * the TFTP server.  Since files are opened and closed as part of the GET/PUT process,
- * it could potentially cause file corruption if there was already a file open.
+ * It would probably be best to ensure that no files are open prior to passing control
+ * off to the TFTP server.  Since files are opened and closed as part of the GET/PUT
+ * process, it could potentially cause file corruption if there was already a file open.
  *
  * The attempt has been made to stick as close to the TFTP protocol as possible.
  * Timeouts were implemented as best I could figure out because the
