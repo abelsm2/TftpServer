@@ -113,6 +113,16 @@ public:
 	 * unless you can change the port number expected on the TFTP client.
 	 */
 	bool begin(SdFat* sd, bool serialDebug = false, uint16_t portNum = 69);
+	
+	/**
+	 * Stop the TFTP server and the UDP instance created within as well as any
+	 * files that may be open.
+	 *
+	 * @note this will free up the UDP socket used by the library
+	 *
+	 * @warning this will require calling begin again before any TFTP transfers can take place
+	 */
+	void stop();
 
 	/**
 	 * Check to see if a packet has arrived at the TFTP port.
