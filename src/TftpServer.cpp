@@ -5,8 +5,6 @@
  * @author Micah Abelson
  * @date May 20, 2017
  *
- *
- *
  * MIT License
  *
  * Copyright (c) 2017 Micah L. Abelson
@@ -32,8 +30,8 @@
 
 #include "TftpServer.h"
 
-const uint32_t INITIAL_TIMEOUT = 10; // milliseconds
-const uint32_t TIMEOUT_MIN = 10; 	 // milliseconds
+const uint32_t INITIAL_TIMEOUT = 50; // milliseconds
+const uint32_t TIMEOUT_MIN = 50; 	 // milliseconds
 const uint32_t TIMEOUT_MAX = 10000;  // milliseconds
 const uint8_t MAX_RETRANSMISSIONS = 8;
 
@@ -69,10 +67,10 @@ bool TftpServer::begin (SdFat* sd, bool serialDebug, uint16_t portNumber) {
 bool TftpServer::checkForPacket() {
 
 	// check for a packet
-	bufferCount = m_tftp.receivePacket (udpBuffer, UDP_BUFFER_SIZE);
+	m_bufferCount = m_tftp.receivePacket (udpBuffer, UDP_BUFFER_SIZE);
 
 	// the buffer has data in it so we have a packet!
-	if (bufferCount > 0) {
+	if (m_bufferCount > 0) {
 
 		// get information on the packet sender
 		m_remoteIpAddress = m_tftp.remoteIP();
@@ -82,9 +80,9 @@ bool TftpServer::checkForPacket() {
 	}
 
 	// There was a UDP error, restart UDP
-	else if (bufferCount < 0) {
+	else if (m_bufferCount < 0) {
 
-		if (m_serialDebug) Serial.printlnf ("***ERROR: TFTP receivePacket error %d", bufferCount);
+		if (m_serialDebug) Serial.printlnf ("***ERROR: TFTP receivePacket error %d", m_bufferCount);
 
 		// reinitialize UDP to clear the error
 		m_tftp.begin (m_localPort);
@@ -114,7 +112,7 @@ void TftpServer::processRequest() {
 		handleReadRequest();
 	}
 
-	/// Write Request - NOT CURRENTLY SUPPORTED
+	/// Write Request
 	else if (m_opCode == WRQ) {
 
 		handleWriteRequest();
@@ -126,7 +124,7 @@ void TftpServer::processRequest() {
 		if (m_serialDebug) Serial.println ("***ERROR: Initial Request is not RRQ or WRQ!");
 
 		// Send error message to originator
-		sendError (ILLEGAL_OPERATION, m_errorIllegalOperation);
+		sendError (ILLEGAL_OPERATION, m_errorIllegalOperation, "***ERROR: Initial Request is not RRQ or WRQ!");
 	}
 
 	if (m_serialDebug)
@@ -150,10 +148,147 @@ void TftpServer::updateTimeout() {
 // WRQ
 void TftpServer::handleWriteRequest() {
 
-	if (m_serialDebug) Serial.println ("***ERROR: Write Request - Feature Not Supported!");
+	if (m_serialDebug) Serial.println("Write Request!");
 
-	// Send error message to originator
-	sendError (NOT_DEFINED, m_errorFeatureNotSupported);
+	// the transfer ID for the remote client is the same as their port number
+	m_transferId = m_remotePort;
+
+	// initialize variables
+	bool transferComplete = false;
+
+	// let's track dropped packets if we are debugging
+	if (m_serialDebug) m_droppedPacket = 0;
+
+	// Read the file name requested
+	readText (m_fileName);
+
+	// Read the desired transfer mode (OCTET or NETASCII)
+	readText (m_transferMode);
+
+	// convert transfer mode to all caps
+	for (uint8_t i = 0; i < 10; ++i) {
+		m_transferMode[i] = toupper (m_transferMode[i]);
+	}
+
+	// make sure the file does not exist
+	if (!m_sd->exists (m_fileName.c_str())) {
+
+		// Open a file with the desired filename
+		m_file.open(m_fileName.c_str(), O_CREAT | O_WRITE);
+
+		if (!m_file.isOpen()) {
+
+			// Send error message as an ACK that there was an issue
+			sendError (ACCESS_VIOLATION, m_errorAccessViolation, "TFTP file create error (SD Error)");
+
+			// close the file
+			m_file.close();
+
+			// return
+			return;
+		}
+	}
+
+	else {
+
+		// Send error message as an ACK that file already exists
+		sendError (FILE_EXISTS, m_errorFileAlreadyExists, "***ERROR: File Already Exists!");
+
+		return;
+	}
+
+	// send an ACK that the write request is accepted
+	sendAck(0);
+
+	// 1st data packet should be block 1
+	m_blockNumber = 1;
+
+	while (!transferComplete) {
+
+		// check for a data packet
+		if (checkForPacket()) {
+
+			// start from the beginning of the buffer
+			m_bufferPosition = 0;
+
+			// verify the message came from someone we expect
+			if (m_remotePort != m_tftp.remotePort()) {
+
+				// Send error message to the unknown sender that this transfer ID is invalid
+				// don't kill the connection for this type of error
+				sendError (UNKNOWN_ID, m_errorUnknownTransferId, "***ERROR: Unknown Transfer ID",
+						m_tftp.remoteIP(), m_tftp.remotePort());
+			}
+
+			else {
+
+				// 1st 2 bytes of incoming packet are the opcode
+				m_opCode = readWord();
+
+				// if this is a DATA block then get the block number and write to SD
+				if (m_opCode == DATA) {
+
+					// make sure the block number matches
+					if (m_blockNumber == readWord()) {
+
+						// check to see if this is the last data packet
+						if (m_bufferCount >= 0 && m_bufferCount < 512) {
+
+							transferComplete = true;
+						}
+
+						// write the file as binary if OCTET mode was requested and do nothing
+						// if NETASCII is selected (just accept the file as if it was binary)
+						if (m_transferMode.compare ("OCTET") == 0 ||
+								m_transferMode.compare ("NETASCII") == 0) {
+
+							// write the file starting from the 5th byte in the buffer
+							if (m_file.write (&udpBuffer[4], m_bufferCount) < 0) {
+
+								// Send error message as an ACK that there was an issue
+								sendError (ACCESS_VIOLATION, m_errorAccessViolation, "TFTP file write error (SD Error)");
+
+								// close the file
+								m_file.close();
+
+								// return
+								return;
+							}
+
+							else {
+
+								// force data to be written to SD
+								m_file.sync();
+
+								// ACK the block just written
+								sendAck (m_blockNumber++);
+							}
+						}
+
+						else {
+
+							// Send error message as an ACK
+							sendError (ILLEGAL_OPERATION, m_errorIllegalOperation, "***ERROR: Illegal TFTP Transfer Mode!");
+						}
+					}
+
+					else {
+
+						// Ignore this packet.  The block number doesn't match so it might be a duplicate packet
+					}
+				}
+
+				// this is not a DATA packet and one was expected so ignore it
+				else {
+
+					if (m_serialDebug) Serial.println ("***ERROR: Received something other than DATA");
+				}
+			}
+		}
+	}
+
+	// close the file
+	m_file.close();
 }
 
 // RRQ
@@ -181,316 +316,319 @@ void TftpServer::handleReadRequest() {
 	// check that the file exists
 	if (m_sd->exists (m_fileName.c_str())) {
 
-		// initialize variables
-		m_blockNumber = 0;
-		uint8_t txBuffer[512] = {0};
-		bool sendData = true;
-		bool receivedFinalAck = false;
-		bool transferComplete = false;
-		bool ignoreTime = false;
-		uint8_t ackCount = 0;
-
-		// track if we found a lone \n and didn't have enough room to insert \r
-		bool startNextPacketWithNewLine = false;
-
-		// track if we found a lone \r and didn't have enough room to insert \0
-		bool startNextPacketWithNull = false;
-
-		// track if we found a \r\n and should not insert \r
-		bool dontInsertCarriageReturn = false;
-
 		// open the requested file
 		m_file = m_sd->open (m_fileName.c_str(), O_READ);
 
-		// loop until the entire file is sent
-		while (!transferComplete || !receivedFinalAck) {
+		if (!m_file.isOpen()) {
 
-			// only do these things if we are ready
-			if (sendData) {
+			// Send error message as an ACK that there was an issue
+			sendError (ACCESS_VIOLATION, m_errorAccessViolation, "TFTP file open error (SD Error)");
 
-				m_blockSize = 0;
+			// close the file
+			m_file.close();
 
-				// Send the file as binary if OCTET mode was requested
-				if (m_transferMode.compare ("OCTET") == 0) {
+			// return
+			return;
+		}
+	}
 
-					// read the next 512 byte block from the file (this is a binary read)
-					m_blockSize = m_file.read (txBuffer, 512);
+	// Error: file does not exist
+	else {
 
-					// verify there was a good read
-					if (m_blockSize < 0) {
+		// Send error message as an ACK
+		sendError (FILE_NOT_FOUND, m_errorFileNotFound, "***ERROR: File Not Found!");
+	}
 
-						// there was a read error
-						if (m_serialDebug) Serial.println ("TFTP File Read Error (SD Error)");
+	// initialize variables
+	m_blockNumber = 0;
+	bool sendData = true;
+	bool receivedFinalAck = false;
+	bool transferComplete = false;
+	bool ignoreTime = false;
 
-						// freeze here
-						Particle.process();
-					}
+	// track if we found a lone \n and didn't have enough room to insert \r
+	bool startNextPacketWithNewLine = false;
+
+	// track if we found a lone \r and didn't have enough room to insert \0
+	bool startNextPacketWithNull = false;
+
+	// track if we found a \r\n and should not insert \r
+	bool dontInsertCarriageReturn = false;
+
+	// loop until the entire file is sent
+	while (!transferComplete || !receivedFinalAck) {
+
+		// only do these things if we are ready
+		if (sendData) {
+
+			m_blockSize = 0;
+
+			// Send the file as binary if OCTET mode was requested
+			if (m_transferMode.compare ("OCTET") == 0) {
+
+				// read the next 512 byte block from the file (this is a binary read)
+				m_blockSize = m_file.read (&udpBuffer[4], 512);
+
+				// verify there was a good read
+				if (m_blockSize < 0) {
+
+					// Send error message as an ACK that there was an issue
+					sendError (ACCESS_VIOLATION, m_errorAccessViolation, "TFTP File Read Error (SD Error)");
+
+					// close the file
+					m_file.close();
+
+					// return
+					return;
+				}
+			}
+
+			// Convert the file to NVT ASCII if NETASCII mode was requested
+			else if (m_transferMode.compare ("NETASCII") == 0) {
+
+				if (startNextPacketWithNewLine) {
+
+					// put the \n from the \r\n combo from the previous packet at the start of the packet
+					udpBuffer [4 + m_blockSize++] = '\n';
+
+					// reset for the next packet
+					startNextPacketWithNewLine = false;
 				}
 
-				// Convert the file to NVT ASCII if NETASCII mode was requested
-				else if (m_transferMode.compare ("NETASCII") == 0) {
+				else if (startNextPacketWithNull) {
 
-					if (startNextPacketWithNewLine) {
+					// put the \n from the \r\n combo from the previous line at the start of the packet
+					udpBuffer [4 + m_blockSize++] = '\0';
 
-						// put the \n from the \r\n combo from the previous packet at the start of the packet
-						txBuffer [m_blockSize++] = '\n';
+					// reset for the next packet
+					startNextPacketWithNull = false;
+				}
 
-						// reset for the next packet
-						startNextPacketWithNewLine = false;
+				// fill up the buffer with 512 bytes of data or stop at EOF
+				while (m_blockSize < 512 && m_file.peek() != EOF) {
+
+					// grab the next character
+					uint8_t c = m_file.read();
+
+					if (c < 0) {
+
+						// Send error message as an ACK that there was an issue
+						sendError (ACCESS_VIOLATION, m_errorAccessViolation, "TFTP File Read Error (SD Error)");
+
+						// close the file
+						m_file.close();
+
+						// return
+						return;
 					}
 
-					else if (startNextPacketWithNull) {
+					// check for a \r\n sequence so we don't insert an extra \r
+					if (c == '\r' && m_file.peek() == '\n') {
 
-						// put the \n from the \r\n combo from the previous line at the start of the packet
-						txBuffer [m_blockSize++] = '\0';
+						dontInsertCarriageReturn = true;
 
-						// reset for the next packet
-						startNextPacketWithNull = false;
+						// put the \r character into the buffer
+						udpBuffer [4 + m_blockSize++] = c;
 					}
 
-					// fill up the buffer with 512 bytes of data or stop at EOF
-					while (m_blockSize < 512 && m_file.peek() != EOF) {
+					// replace \n with \r\n as long as it's not already part of \r\n
+					else if (c == '\n' && !dontInsertCarriageReturn) {
 
-						// grab the next character
-						uint8_t c = m_file.read();
+						// insert the \r
+						udpBuffer [4 + m_blockSize++] = '\r';
 
-						if (c < 0) {
+						// check to see if we reached the end of the buffer
+						if (m_blockSize == 512) {
 
-							// there was a read error
-							if (m_serialDebug) Serial.println ("TFTP File Read Error (SD Error)");
+							// set so the start of the next packet buffer will be the \n
+							startNextPacketWithNewLine = true;
 
-							// freeze here
-							Particle.process();
-						}
-
-						// check for a \r\n sequence so we don't insert an extra \r
-						if (c == '\r' && m_file.peek() == '\n') {
-
-							dontInsertCarriageReturn = true;
-
-							// put the \r character into the buffer
-							txBuffer [m_blockSize++] = c;
-						}
-
-						// replace \n with \r\n as long as it's not already part of \r\n
-						else if (c == '\n' && !dontInsertCarriageReturn) {
-
-							// insert the \r
-							txBuffer [m_blockSize++] = '\r';
-
-							// check to see if we reached the end of the buffer
-							if (m_blockSize == 512) {
-
-								// set so the start of the next packet buffer will be the \n
-								startNextPacketWithNewLine = true;
-
-								// get out of the loop for this packet
-								break;
-							}
-
-							else {
-
-								// we have space in the buffer so write the \n
-								txBuffer [m_blockSize++] = '\n';
-							}
-						}
-
-						// replace lone \r with \r\0
-						else if (c == '\r' && m_file.peek() != '\n') {
-
-							// write the \r
-							txBuffer [m_blockSize++] = '\r';
-
-							// check to see if we reached the end of the buffer
-							if (m_blockSize == 512) {
-
-								// set so the start of the next buffer will be the \0
-								startNextPacketWithNull = true;
-
-								// get out of the loop for this packet
-								break;
-							}
-
-							else {
-
-								// we have space in the buffer so write the \0
-								txBuffer [m_blockSize++] = '\0';
-							}
+							// get out of the loop for this packet
+							break;
 						}
 
 						else {
 
-							// put the next character into the buffer
-							txBuffer [m_blockSize++] = c;
-						}
-					}
-				}
-
-				// The transfer mode doesn't match anything so respond with an error.
-				else {
-
-					if (m_serialDebug) Serial.println ("***ERROR: Illegal TFTP Transfer Mode!");
-
-						// Send error message as an ACK
-						sendError (ILLEGAL_OPERATION, m_errorIllegalOperation);
-				}
-
-				// check for EOF
-				if (m_blockSize >= 0 && m_blockSize < 512) {
-
-					// Reached end of file
-					transferComplete = true;
-				}
-
-				// increment the file block number
-				m_blockNumber++;
-
-				// send the data packet
-				sendDataPacket (txBuffer);
-
-				// start the clock for calculating round trip time
-				m_rttCalcStart = millis();
-				m_resendStart = m_rttCalcStart;
-
-				// reset for the new data packet just sent out
-				m_numberOfRetransmissions = 0;
-
-				// reset since we haven't received any ACK for this new data packet yet
-				ackCount = 0;
-
-				// don't proceed with the next block until valid ACK
-				sendData = false;
-
-				// reset flag so we don't ignore time
-				ignoreTime = false;
-
-			}
-
-			// check for a new UDP message (looking for an ACK)
-			else if (checkForPacket()) {
-
-				// start from the beginning of the buffer
-				m_bufferPosition = 0;
-
-				uint16_t ackBlockNumber = 0;
-
-				// verify the message came from someone we expect
-				if (m_remotePort != m_tftp.remotePort()) {
-
-					// there was a read error
-					if (m_serialDebug) Serial.println ("***ERROR: Unknown Transfer ID");
-
-					// Send error message as an ACK but don't kill the connection
-					sendError (UNKNOWN_ID, m_errorUnknownTransferId);
-				}
-
-				else {
-
-					// 1st 2 bytes of incoming packet are the opcode
-					m_opCode = readWord();
-
-					// if this is an ACK then get the block number
-					if (m_opCode == ACK) {
-
-						// ACK block number is the next 2 bytes
-						ackBlockNumber = readWord();
-
-						// check to see if we got an ACK for the correct block
-						// Does not allow previous blocks to be re-sent since
-						// m_blockNumber is incremented as soon as data is buffered,
-						// so it should prevent Sorcerer's Apprentice Syndrome.
-						if (ackBlockNumber == m_blockNumber) {
-
-							// count the number of ACK for the block we are on
-							ackCount ++;
-
-							// stop the RTT clock because we got an ACK (only if it's the 1st one)
-							if ((ackCount == 1) && !ignoreTime) {
-
-								m_rttCalcFinish = millis();
-
-								// keep updating timeout based on current network conditions
-								updateTimeout();
-							}
-
-							// This is the ACK we are looking for... send the next block
-							sendData = true;
-
-							if (transferComplete) {
-
-								// this is the ACK for the EOF!
-								receivedFinalAck = true;
-							}
+							// we have space in the buffer so write the \n
+							udpBuffer [4 + m_blockSize++] = '\n';
 						}
 					}
 
-					// this is not an ACK and one was expected so ignore it
+					// replace lone \r with \r\0
+					else if (c == '\r' && m_file.peek() != '\n') {
+
+						// write the \r
+						udpBuffer [4 + m_blockSize++] = '\r';
+
+						// check to see if we reached the end of the buffer
+						if (m_blockSize == 512) {
+
+							// set so the start of the next buffer will be the \0
+							startNextPacketWithNull = true;
+
+							// get out of the loop for this packet
+							break;
+						}
+
+						else {
+
+							// we have space in the buffer so write the \0
+							udpBuffer [4 + m_blockSize++] = '\0';
+						}
+					}
+
 					else {
 
-						if (m_serialDebug) Serial.println ("***ERROR: Received something other than ACK");
-
+						// put the next character into the buffer
+						udpBuffer [4 + m_blockSize++] = c;
 					}
 				}
 			}
 
-			// check to see if we should re-send the last data packet
-			else if ((millis() - m_resendStart) > m_timeout) {
+			// The transfer mode doesn't match anything so respond with an error.
+			else {
 
-				if (m_serialDebug) Serial.printlnf ("***ERROR: Timeout (%u ms).  Re-sending Data packet %u\t RTT: %f",
-						m_timeout, m_blockNumber, m_rtt);
+				// Send error message as an ACK
+				sendError (ILLEGAL_OPERATION, m_errorIllegalOperation, "***ERROR: Illegal TFTP Transfer Mode!");
+			}
 
-				// send the same data packet again
-				sendDataPacket (txBuffer);
+			// check for EOF
+			if (m_blockSize >= 0 && m_blockSize < 512) {
 
-				// reset the timer
-				m_resendStart = millis();
+				// Reached end of file
+				transferComplete = true;
+			}
 
-				// ignore time data for resent packets
-				ignoreTime = true;
+			// increment the file block number
+			m_blockNumber++;
 
-				// increase the transmission count for the exponential back-off
-				m_numberOfRetransmissions++;
+			// send the data packet
+			sendDataPacket ();
 
-				// increase the timeout exponentially with each retransmission
-				m_timeout *= 2;
+			// start the clock for calculating round trip time
+			m_rttCalcStart = millis();
+			m_resendStart = m_rttCalcStart;
 
-				// track dropped packets only for debug output
-				if (m_serialDebug) m_droppedPacket++;
+			// reset for the new data packet just sent out
+			m_numberOfRetransmissions = 0;
 
-				m_timeout = constrain (m_timeout, TIMEOUT_MIN, TIMEOUT_MAX);
+			// don't proceed with the next block until valid ACK
+			sendData = false;
 
-				// check to see if we should give up
-				if (m_numberOfRetransmissions >= MAX_RETRANSMISSIONS) {
+			// reset flag so we don't ignore time
+			ignoreTime = false;
 
-					if (m_serialDebug) Serial.println ("***ERROR: Timeout on Send");
+		}
 
-					// tell the client we are not getting along
-					sendError (NOT_DEFINED, m_errorTimeoutOnSend);
+		// check for a new UDP message (looking for an ACK)
+		else if (checkForPacket()) {
 
-					// get us out of here.
-					sendData = false;
-					receivedFinalAck = true;
-					transferComplete = true;
+			// start from the beginning of the buffer
+			m_bufferPosition = 0;
+
+			uint16_t ackBlockNumber = 0;
+
+			// verify the message came from someone we expect
+			if (m_remotePort != m_tftp.remotePort()) {
+
+				// Send error message to the unknown sender that this transfer ID is invalid
+				// don't kill the connection for this type of error
+				sendError (UNKNOWN_ID, m_errorUnknownTransferId, "***ERROR: Unknown Transfer ID",
+						m_tftp.remoteIP(), m_tftp.remotePort());
+			}
+
+			else {
+
+				// 1st 2 bytes of incoming packet are the opcode
+				m_opCode = readWord();
+
+				// if this is an ACK then get the block number
+				if (m_opCode == ACK) {
+
+					// ACK block number is the next 2 bytes
+					ackBlockNumber = readWord();
+
+					// check to see if we got an ACK for the correct block
+					// Does not allow previous blocks to be re-sent since
+					// m_blockNumber is incremented as soon as data is buffered,
+					// so it should prevent Sorcerer's Apprentice Syndrome.
+					if (ackBlockNumber == m_blockNumber) {
+
+						// stop the RTT clock because we got an ACK (only if it's the 1st one)
+						if (!ignoreTime) {
+
+							m_rttCalcFinish = millis();
+
+							// keep updating timeout based on current network conditions
+							updateTimeout();
+						}
+
+						// This is the ACK we are looking for... send the next block
+						sendData = true;
+
+						if (transferComplete) {
+
+							// this is the ACK for the EOF!
+							receivedFinalAck = true;
+						}
+					}
+				}
+
+				// this is not an ACK and one was expected so ignore it
+				else {
+
+					if (m_serialDebug) Serial.println ("***ERROR: Received something other than ACK");
+
 				}
 			}
 		}
 
-		// close the file
-		m_file.close();
+		// check to see if we should re-send the last data packet
+		else if ((millis() - m_resendStart) > m_timeout) {
+
+			if (m_serialDebug) Serial.printlnf ("***ERROR: Timeout (%u ms).  Re-sending Data packet %u\t RTT: %f",
+					m_timeout, m_blockNumber, m_rtt);
+
+			// send the same data packet again
+			sendDataPacket ();
+
+			// reset the timer
+			m_resendStart = millis();
+
+			// ignore time data for resent packets
+			ignoreTime = true;
+
+			// increase the transmission count for the exponential back-off
+			m_numberOfRetransmissions++;
+
+			// increase the timeout exponentially with each retransmission
+			m_timeout *= 2;
+
+			// track dropped packets only for debug output
+			if (m_serialDebug) m_droppedPacket++;
+
+			m_timeout = constrain (m_timeout, TIMEOUT_MIN, TIMEOUT_MAX);
+
+			// check to see if we should give up
+			if (m_numberOfRetransmissions >= MAX_RETRANSMISSIONS) {
+
+				// tell the client we are not getting along
+				sendError (NOT_DEFINED, m_errorTimeoutOnSend, "***ERROR: Timeout on Send");
+
+				// get us out of here.
+				sendData = false;
+				receivedFinalAck = true;
+				transferComplete = true;
+			}
+		}
 	}
 
-	/// Error: file does not exist
-	else {
-
-		if (m_serialDebug) Serial.println ("***ERROR: File Not Found!");
-
-		// Send error message as an ACK
-		sendError (FILE_NOT_FOUND, m_errorFileNotFound);
-	}
+	// close the file
+	m_file.close();
 }
 
 // Send a data packet
-bool TftpServer::sendDataPacket (const uint8_t* txData) {
+bool TftpServer::sendDataPacket () {
 
 	uint16_t opCode = DATA;
 
@@ -501,9 +639,6 @@ bool TftpServer::sendDataPacket (const uint8_t* txData) {
 	// Next 2 bytes of ACK message are the block number
 	udpBuffer[2] = (static_cast <uint8_t> (m_blockNumber >> 8));
 	udpBuffer[3] = (static_cast <uint8_t> (m_blockNumber));
-
-	// The next 512 bytes are the data file
-	memcpy (&udpBuffer[4], txData, m_blockSize);
 
 	// send the buffer and check for send errors
 	if (m_tftp.sendPacket (udpBuffer, 4 + m_blockSize, m_remoteIpAddress, m_remotePort) < 0) {
@@ -541,7 +676,21 @@ bool TftpServer::sendAck (uint16_t blockNumber) {
 }
 
 // send an error message to a client
-bool TftpServer::sendError (uint16_t errorCode, const std::string errorMessage) {
+bool TftpServer::sendError (uint16_t errorCode, const std::string errorMessage, const char* debugMessage) {
+
+	if (!sendError (errorCode, errorMessage, debugMessage, m_remoteIpAddress, m_remotePort)) {
+
+		return false;
+	}
+
+	return true;
+}
+
+// send an error message to a client
+bool TftpServer::sendError (uint16_t errorCode, const std::string errorMessage, const char* debugMessage,
+		IPAddress remoteIpAddress, uint16_t remotePort) {
+
+	if (m_serialDebug) Serial.println (debugMessage);
 
 	uint16_t opCode = ERROR;
 
@@ -563,7 +712,7 @@ bool TftpServer::sendError (uint16_t errorCode, const std::string errorMessage) 
 	udpBuffer[4 + errorMessage.length()] = 0;
 
 	// send the buffer and check for send errors
-	if (m_tftp.sendPacket (udpBuffer, 5 + errorMessage.length(), m_remoteIpAddress, m_remotePort) < 0) {
+	if (m_tftp.sendPacket (udpBuffer, 5 + errorMessage.length(), remoteIpAddress, remotePort) < 0) {
 
 		if (m_serialDebug) Serial.println ("***ERROR: Send Failure on sendError!");
 
@@ -579,7 +728,7 @@ uint16_t TftpServer::readWord() {
 	uint16_t MSB = 0;
 	uint16_t LSB = 0;
 
-	MSB = static_cast <uint16_t> (udpBuffer [m_bufferPosition++]) << 8;
+	MSB = static_cast <uint16_t> (udpBuffer [m_bufferPosition++] << 8);
 	LSB = udpBuffer [m_bufferPosition++];
 
 	return (MSB | LSB);
@@ -591,7 +740,7 @@ void TftpServer::readText (std::string& buffer) {
 
 	// read in characters of a string until a 0 byte (NULL) is found
 	while (udpBuffer [m_bufferPosition] != 0)
-		buffer.push_back (udpBuffer[m_bufferPosition++]);
+		buffer.push_back (udpBuffer [m_bufferPosition++]);
 
 	// move past the 0
 	m_bufferPosition++;

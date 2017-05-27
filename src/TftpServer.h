@@ -93,10 +93,8 @@
 #ifndef _TFTPSERVER_H_
 #define _TFTPSERVER_H_
 
-#include <cstring>
-#include <string>
 #include "Particle.h"
-#include "../../libraries/SdFat-Particle/src/SdFat.h"
+#include "SdFat.h"
 
 /**
  * @class TftpServer
@@ -171,7 +169,7 @@ private:
 
 	// UDP variables
 	UDP m_tftp;
-	int16_t bufferCount;
+	int16_t m_bufferCount;
 	uint16_t m_bufferPosition;
 	uint16_t m_localPort;
 	IPAddress m_remoteIpAddress;
@@ -255,7 +253,7 @@ private:
 	 * @param txBuffer The full buffer that is to be sent.
 	 * @return True on success or False on send error.
 	 */
-	bool sendDataPacket (const uint8_t* txBuffer);
+	bool sendDataPacket ();
 
 	/**
 	 * This method will generate an ACK message
@@ -266,13 +264,27 @@ private:
 	bool sendAck (uint16_t blockNumber);
 
 	/**
-	 * Send an error code and message to the connected client
+	 * Send an error code and message to a client
 	 *
 	 * @param errorCode Code corresponding to the TFTP error type
 	 * @param errorMessage String corresponding to the error type
+	 * @param debugMessage String to send to serial when serialDebug is set TRUE in begin()
 	 * @return True on success or False on send error.
 	 */
-	bool sendError (uint16_t errorCode, const std::string errorMessage);
+	bool sendError (uint16_t errorCode, const std::string errorMessage, const char* debugMessage);
+
+	/**
+	 * Send an error code and message to a client
+	 *
+	 * @param errorCode Code corresponding to the TFTP error type
+	 * @param errorMessage String corresponding to the error type
+	 * @param debugMessage String to send to serial when serialDebug is set TRUE in begin()
+	 * @param remoteIpAddress IP address to send error message.  Default is sender of RRQ/WRQ
+	 * @param remotePort Port number to send error message.  Default is sender of RRQ/WRQ
+	 * @return True on success or False on send error.
+	 */
+	bool sendError (uint16_t errorCode, const std::string errorMessage, const char* debugMessage,
+			IPAddress remoteIpAddress, uint16_t remotePort);
 
 };
 
