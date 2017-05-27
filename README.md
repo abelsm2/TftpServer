@@ -1,6 +1,6 @@
 # TftpServer
 
-A Particle library for TftpServer
+A Particle library for Trivial File Transfer Protocol (TFTP) Server.
 
 This is a work in progress.  The library should be functional but the examples do not work yet and you might need to verify the include to SdFat.
 
