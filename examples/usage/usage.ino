@@ -1,7 +1,6 @@
 // Example usage for TftpServer library by Micah L. Abelson.
+#include <TftpServer.h>
 
-#include "TftpServer.h"
-#include "SdFat.h"
 TftpServer tftpServer;
 
 // Primary SPI with DMA
@@ -16,16 +15,17 @@ SdFat sd(1);
 
 void setup() {
 
-	// initialize file system.
-	if (!sd.begin (SD_CS_PIN, SPI_FULL_SPEED)) {
+	// initialize file system.  Use SPI_FULL_SPEED for better performance
+	if (!sd.begin (SD_CS_PIN, SPI_HALF_SPEED)) {
 		sd.initErrorPrint();
 	}
 	
-	// Let's put some data on your card
+	// Let's put some dummy data on your SD card
 	std::string fileName = "DATATEST.TXT";
 
 	if (!sd.exists (fileName.c_str())) {
 
+		// create a file instance
 		File myFile;
 
 		// open the file for write
@@ -34,10 +34,12 @@ void setup() {
 			sd.errorHalt ("opening mytest.txt for write failed");
 		}
 
-		for (int i = 0; i < 1000; ++i) {
+		// some dummy data
+		for (int i = 0; i < 10; ++i) {
 			myFile.println ("testing 1, 2, 3.");
 		}
 
+		// write to the file
 		myFile.printlnf ("fileSize: %d", myFile.fileSize());
 
 		// close the file:
@@ -50,8 +52,10 @@ void setup() {
 
 void loop() {
   
+	// check to see if a UDP packet arrived at the TFTP port
   	if (tftpServer.checkForPacket()) {
 		
+		// if we found a packet then handle the request
 		tftpServer.processRequest();
 	}
 }

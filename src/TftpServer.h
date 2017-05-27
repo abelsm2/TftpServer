@@ -1,4 +1,3 @@
-#pragma once
 /**
  * TftpServer library by Micah L. Abelson
  *
@@ -89,6 +88,11 @@
  *  ERROR | 05    |  ErrorCode |   ErrMsg   |   0  |
  *         ----------------------------------------
  */
+
+#ifndef _TFTPSERVER_H_
+#define _TFTPSERVER_H_
+
+#include <SdFat.h>
 
 /**
  * @class TftpServer
@@ -281,3 +285,5 @@ private:
 			IPAddress remoteIpAddress, uint16_t remotePort);
 
 };
+
+#endif /* _TFTPSERVER_H_ */
