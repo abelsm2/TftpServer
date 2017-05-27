@@ -93,6 +93,12 @@ assumption but in the use case of a Particle device, this might not be so bad.
 
 Pull requests to address this are certainly welcome if a condition is found where 
 this behavior is not desired.
+
+This library was developed for use over a local network.  It has not been tested on
+hardware over the internet.  If that is attempted, it might be neccessary to adjust
+starting points for the timeout function.
+
+The timeout function attempts to use an adaptive method but it needs work.
 		 
 ## LICENSE
 
