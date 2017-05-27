@@ -1,5 +1,4 @@
 // Example usage for TftpServer library by Micah L. Abelson.
-#include <TftpServer.h>
 
 TftpServer tftpServer;
 
