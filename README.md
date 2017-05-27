@@ -132,6 +132,17 @@ TFTP Formats
   ERROR | 05    |  ErrorCode |   ErrMsg   |   0  |
          ----------------------------------------
 
+## FUTURE WORK
+While the library will accept write requests in NETASCII format, it does not
+currently do anything to the received library.  This does not strictly conform
+to the TFTP standard but was implemented this way since it was assumed the same
+operating system that is requesting a write will also be the same system that 
+will request a read.  In a more general application this is probably a bad
+assumption but in the use case of a Particle device, this might not be so bad.
+
+Pull requests to address this are certainly welcome if a condition is found where 
+this behavior is not desired.
+		 
 ## LICENSE
 
 Licensed under the MIT License
