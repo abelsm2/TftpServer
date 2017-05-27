@@ -64,6 +64,14 @@ bool TftpServer::begin (SdFat* sd, bool serialDebug, uint16_t portNumber) {
 	return true;
 }
 
+// shut it down
+void TftpServer::stop() {
+
+	m_tftp.stop();
+
+	if (m_file.isOpen()) m_file.close();
+}
+
 bool TftpServer::checkForPacket() {
 
 	// check for a packet
