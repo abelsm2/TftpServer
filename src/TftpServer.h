@@ -90,12 +90,6 @@
  *         ----------------------------------------
  */
 
-#ifndef _TFTPSERVER_H_
-#define _TFTPSERVER_H_
-
-#include "Particle.h"
-#include "SdFat.h"
-
 /**
  * @class TftpServer
  */
@@ -287,5 +281,3 @@ private:
 			IPAddress remoteIpAddress, uint16_t remotePort);
 
 };
-
-#endif /* _TFTPSERVER_H_ */
