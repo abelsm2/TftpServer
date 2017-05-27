@@ -6,71 +6,22 @@ This is a work in progress.  The library should be functional but the examples d
 
 ## Usage
 
-Connect an SD card on SPI or SPI1, add the TftpServer library to your project and follow this example:
+Connect an SD card on SPI or SPI1, add the TftpServer library to your project and follow the usage example in the [examples](examples) folder for more details.
 
-NOTE:  comment out or uncomment the appropriate SdFat instance depending on whether you are using SPI or SPI1
+After flashing the example to your device, use a TFTP client to connect to the IP address assigned to your Particle device.  Once there you can use the GET or PUT commands with either NETASCII or OCTET methods.
 
+For example, using the windows TFTP client to download the file created in the example using NETASCII, the command would be:
 ```
-#include "TftpServer.h"
-#include "SdFat.h"
-TftpServer tftpServer;
-
-// Primary SPI with DMA
-// SCK => A3, MISO => A4, MOSI => A5, SS => A2 (default)
-//const uint8_t SD_CS_PIN = A2;
-//SdFat sd;
-
-// Secondary SPI with DMA
-// SCK => D4, MISO => D3, MOSI => D2, SS => D5
-const uint8_t SD_CS_PIN = D5;
-SdFat sd(1);
-
-void setup() {
-
-	// initialize file system.
-	if (!sd.begin (SD_CS_PIN, SPI_FULL_SPEED)) {
-		sd.initErrorPrint();
-	}
-	
-	// Let's put some data on your card
-	std::string fileName = "DATATEST.TXT";
-
-	if (!sd.exists (fileName.c_str())) {
-
-		File myFile;
-
-		// open the file for write
-		if (!myFile.open (fileName.c_str(), O_RDWR | O_CREAT)) {
-			
-			sd.errorHalt ("opening mytest.txt for write failed");
-		}
-
-		for (int i = 0; i < 1000; ++i) {
-			myFile.println ("testing 1, 2, 3.");
-		}
-
-		myFile.printlnf ("fileSize: %d", myFile.fileSize());
-
-		// close the file:
-		myFile.close();
-	}
-
-	// start the TFTP server and pass the SdFat file system
-	tftpServer.begin(&sd);
-}
-
-void loop() {
-  
-  	if (tftpServer.checkForPacket()) {
-		
-		tftpServer.processRequest();
-	}
-}
+>tftp 192.168.1.XX GET DATATEST.TXT DATATEST.TXT
 ```
-
-Using a TFTP client, connect to the IP address assigned to your device and use the get command
-
-See the [examples](examples) folder for more details.
+And to download the same file using the OCTET (binary) method, the command would be:
+```
+>tftp -i 192.168.1.XX GET DATATEST.TXT DATATEST.TXT
+```
+You can also upload any files from your computer to the SD card attached to the particle device.  Unless you are uploading text files you should be sure to transfer them using the OCTET method.  For example, to upload a PDF file called `myfile` the command would be:
+```
+>tftp -i 192.168.1.XX PUT myfile.pdf myfile.pdf
+```
 
 ## Documentation
 
